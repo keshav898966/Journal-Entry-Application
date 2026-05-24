@@ -25,9 +25,9 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         Bandwidth limit =
                 Bandwidth.classic(
-                        1,
+                        5,
                         Refill.greedy(
-                                1,
+                                5,
                                 Duration.ofMinutes(1)
                         )
                 );
