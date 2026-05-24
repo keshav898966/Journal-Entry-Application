@@ -1,44 +1,91 @@
 package com.example.JournalApp.config;
 
-import com.example.JournalApp.Service.UserDetailServiceImpl;
+import com.example.JournalApp.rateLimiter.RateLimitingFilter;
+import com.example.JournalApp.security.JwtFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 @EnableWebSecurity
 public class SpringSecurity {
 
     @Autowired
-    private UserDetailServiceImpl userDetailService;
-
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http)throws Exception{
-        return http.authorizeHttpRequests(request -> request
-                .requestMatchers("/public/**").permitAll()
-//                .requestMatchers("/journal/**","/user/**").authenticated()
-//                .requestMatchers("/admin/**").hasRole("ADMIN")
-                .anyRequest().authenticated())
-                .httpBasic(Customizer.withDefaults())
-                .csrf(AbstractHttpConfigurer::disable)
-                .build();
-    }
-
+    private JwtFilter jwtFilter;
     @Autowired
-    public void configureGlobal(AuthenticationManagerBuilder auth)throws Exception{
-        auth.userDetailsService(userDetailService).passwordEncoder(passwordEncoder());
-    }
+    private RateLimitingFilter rateLimitingFilter;
 
     @Bean
     public PasswordEncoder passwordEncoder(){
         return new BCryptPasswordEncoder();
     }
+
+    @Bean
+    public AuthenticationManager authenticationManager(
+            AuthenticationConfiguration configuration)
+            throws Exception {
+
+        return configuration.getAuthenticationManager();
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http)
+            throws Exception {
+
+        return http
+                .csrf(AbstractHttpConfigurer::disable)
+
+                .authorizeHttpRequests(request -> request
+
+                        .requestMatchers(
+                                "/auth/**",
+                                "/public/**",
+                                "/uploads/**",
+                                "/swagger-ui/**",
+                                "/v3/api-docs/**"
+                        ).permitAll()
+
+                        .requestMatchers("/admin/**")
+                        .hasRole("ADMIN")
+
+                        .anyRequest()
+                        .authenticated()
+                )
+
+                .logout(AbstractHttpConfigurer::disable)
+
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(
+                                SessionCreationPolicy.STATELESS
+                        )
+                )
+
+
+                .addFilterBefore(
+                        rateLimitingFilter,
+                        UsernamePasswordAuthenticationFilter.class
+                )
+
+                .addFilterBefore(
+                        jwtFilter,
+                        UsernamePasswordAuthenticationFilter.class
+                )
+
+                .build();
+    }
+
+
+
 }

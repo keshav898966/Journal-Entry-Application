@@ -4,15 +4,23 @@ import com.example.JournalApp.Entry.JournalEntry;
 import com.example.JournalApp.Entry.User;
 import com.example.JournalApp.Service.JournalEntryService;
 import com.example.JournalApp.Service.UserService;
+import com.example.JournalApp.repository.JournalEntryRepository;
 import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
+import org.springframework.data.domain.*;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
-import java.time.LocalDateTime;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/journal")
@@ -24,68 +32,111 @@ public class JournalEntryControler {
     @Autowired
     private UserService userService;
 
+    @Autowired
+    private JournalEntryRepository journalEntryRepository;
 
-    @GetMapping("{username}")
-   public ResponseEntity<?> getAllUserJournalEntry(@PathVariable String username){
+    @GetMapping
+    public ResponseEntity<?> getAllJournalEntriesOfUser(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "5") int size
+    ) {
+
+        Authentication authentication =
+                SecurityContextHolder.getContext().getAuthentication();
+
+        String username = authentication.getName();
+
         User user = userService.findByusername(username);
-        List<JournalEntry> all= user.getJournalEntryList();
-       if(all!=null && !all.isEmpty()){
-           return new ResponseEntity<>(all, HttpStatus.OK);
-       }
-        return new ResponseEntity<>(HttpStatus.NO_CONTENT);
-   }
 
+        Pageable pageable = PageRequest.of(
+                page,
+                size,
+                Sort.by("title").ascending()
+        );
 
+        int start = (int) pageable.getOffset();
+        int end = Math.min((start + pageable.getPageSize()),
+                user.getJournalEntryList().size());
 
-    @PostMapping("{username}")
-   public ResponseEntity<JournalEntry> createEntry(@RequestBody JournalEntry myEntry,@PathVariable String username){
-        try{
-            myEntry.setDate(LocalDateTime.now());
-            journalEntryService.saveEntry(myEntry,username);
-            return new ResponseEntity<>(HttpStatus.CREATED);
-        }catch (Exception e){
-            return new ResponseEntity<>(HttpStatus.BAD_REQUEST);
+        List<JournalEntry> pageContent =
+                user.getJournalEntryList().subList(start, end);
+
+        Page<JournalEntry> journalPage =
+                new PageImpl<>(pageContent, pageable,
+                        user.getJournalEntryList().size());
+
+        return ResponseEntity.ok(journalPage);
+    }
+
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> createEntry(
+
+            @RequestParam String title,
+
+            @RequestParam String content,
+
+            @RequestPart(value = "file",
+                    required = false) MultipartFile file)
+
+            throws IOException {
+
+        Authentication authentication =
+                SecurityContextHolder.getContext().getAuthentication();
+
+        String username = authentication.getName();
+
+        JournalEntry myEntry = new JournalEntry();
+
+        myEntry.setTitle(title);
+
+        myEntry.setContent(content);
+
+        // Optional file upload
+        if (file != null && !file.isEmpty()) {
+
+            String uploadDir = "uploads/";
+
+            File dir = new File(uploadDir);
+
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+
+            String filePath =
+                    uploadDir + file.getOriginalFilename();
+
+            Files.copy(
+                    file.getInputStream(),
+                    Paths.get(filePath),
+                    StandardCopyOption.REPLACE_EXISTING
+            );
+
+            myEntry.setImagePath(filePath);
         }
 
-   }
+        journalEntryService.saveEntry(myEntry, username);
 
-   @GetMapping("id/{myid}")
-    public ResponseEntity<JournalEntry> getbyId(@PathVariable ObjectId myid){
-
-       Optional<JournalEntry> journalEntry = journalEntryService.findById(myid);
-       if(journalEntry.isPresent()){
-           return new ResponseEntity<>(journalEntry.get(), HttpStatus.OK);
-       }
-       return new ResponseEntity<>(HttpStatus.NOT_FOUND);
-   }
-
-    @DeleteMapping("id/{username}/{myid}")
-    public ResponseEntity<JournalEntry> deletbyId(@PathVariable ObjectId myid,@PathVariable String username){
-        journalEntryService.deleteById(myid,username);
-        return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+        return ResponseEntity.ok(myEntry);
     }
 
-    @DeleteMapping
-    public ResponseEntity<JournalEntry> delete(){
-        journalEntryService.delete();
-        return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+    @GetMapping("/id/{id}")
+    public ResponseEntity<?> getById(@PathVariable String id){
+
+        return ResponseEntity.ok(
+                journalEntryService.findById(id)
+        );
     }
 
+    @DeleteMapping("/id/{id}")
+    public ResponseEntity<?> deleteById(@PathVariable String id){
 
-    @PutMapping("id/{username}/{id}")
-    public ResponseEntity<?> updatebyid(@PathVariable ObjectId id,
-                                        @RequestBody JournalEntry newEn,
-                                        @PathVariable String username){
-        JournalEntry old= journalEntryService.findById(id).orElse(null);
-        if(old!=null) {
-           old.setTitle(newEn.getTitle()!=null && !newEn.getTitle().equals("")?newEn.getTitle():old.getTitle());
-           old.setContent(newEn.getContent()!=null && !newEn.getContent().equals("")?newEn.getContent():old.getContent());
+        Authentication authentication =
+                SecurityContextHolder.getContext().getAuthentication();
 
-            journalEntryService.saveEntry(old);
-            return new ResponseEntity<>(old,HttpStatus.OK);
-        }
-        return new ResponseEntity<>(HttpStatus.BAD_REQUEST);
+        String username = authentication.getName();
 
+        journalEntryService.deleteById(id, username);
+
+        return ResponseEntity.ok("Deleted");
     }
-
 }
